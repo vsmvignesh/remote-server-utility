@@ -421,7 +421,3 @@ When contributing to this module:
 3. Include logging for all operations
 4. Update this README for new features
 5. Add unit tests for new functionality
-
-## License
-
-This module follows the project's licensing terms. 
