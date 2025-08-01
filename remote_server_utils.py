@@ -93,8 +93,7 @@ class RemoteServer:
         self.strdata = ''
         self.node_details = None
         self.device_vars = device_vars
-        self.priv_key_path = os.path.join(os.environ.get("ZTAF_HOME"),
-                                          'z_components/eve/resources/ztest-ssh-key')
+        self.priv_key_path = None
         self.scp = None
         self.reachable = False
 
