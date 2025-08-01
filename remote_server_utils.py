@@ -1,4 +1,4 @@
-"""This module contains the class to handle the edge node operations"""
+"""This module contains the class to handle the remote server operations"""
 # pylint: disable=too-many-instance-attributes
 import os
 import time
@@ -13,10 +13,10 @@ from scp import SCPClient
 paramiko.common.logging.basicConfig(level=paramiko.common.DEBUG)
 
 
-class EdgeNode:
+class RemoteServer:
 
     """
-    A class to handle the edge node operations /
+    A class to handle the remote server operations /
     This class has the following methods:
     - create_device_session
     - close_connection
@@ -29,8 +29,8 @@ class EdgeNode:
     - parse_out
     - dump_command_output_into_txt
 
-    This class has the variables that reference the edge-node session, shell object, and /
-    the output received from the edge node session socket
+    This class has the variables that reference the remote server session, shell object, and /
+    the output received from the remote server session socket
     """
 
     _instances = {}  # Cache: {frozenset(server_vars.items()): (instance, created_time)}
@@ -38,7 +38,7 @@ class EdgeNode:
     @classmethod
     def get_instance(cls, server_vars, zlogger, ttl_minutes=5):
         """
-        A class method to get an instance of EdgeNode.
+        A class method to get an instance of RemoteServer.
 
         If an instance already exists for the given server_vars and is not expired,
         it returns the existing instance. Otherwise, it creates a new instance.
@@ -49,7 +49,7 @@ class EdgeNode:
             ttl_minutes: Time to live in minutes for the cached instance
                             Currently, it defaults to 5 minutes.
         Returns:
-            EdgeNode instance
+            RemoteServer instance
         """
         key = frozenset(server_vars.items())
         current_time = time.time()
@@ -58,18 +58,18 @@ class EdgeNode:
         if instance_info:
             instance, created_time = instance_info
             if current_time - created_time <= ttl_minutes * 60:
-                zlogger.info(f"Reusing existing EdgeNode instance for {server_vars['server_ip']}")
+                zlogger.info(f"Reusing existing RemoteServer instance for {server_vars['server_ip']}")
                 instance.fulldata = ''
                 instance.strdata = ''
                 return instance
-            zlogger.info(f"Recreating EdgeNode instance for {server_vars['server_ip']} (expired)")
+            zlogger.info(f"Recreating RemoteServer instance for {server_vars['server_ip']} (expired)")
             instance.close_connection()
             del cls._instances[key]  # Remove expired instance from cache
 
         # Create new instance
         new_instance = cls(server_vars, zlogger)
         cls._instances[key] = (new_instance, current_time)
-        zlogger.info(f"Created new EdgeNode instance for {server_vars['server_ip']}")
+        zlogger.info(f"Created new RemoteServer instance for {server_vars['server_ip']}")
         return new_instance
 
     def __init__(self, device_vars, zlogger):
@@ -100,7 +100,7 @@ class EdgeNode:
 
     def create_device_session(self, priv_key=None):
         """
-        A method to create a session with the edge node
+        A method to create a session with the remote server
         :return: client, transport
         """
         retries = 0
@@ -175,7 +175,7 @@ class EdgeNode:
         A method to test the connectivity with the remote server using ping
         """
         if self.reachable:
-            self.logger.info(f"Already verified that Edge node {self.device_vars['server_ip']} is reachable. "
+            self.logger.info(f"Already verified that Remote Server {self.device_vars['server_ip']} is reachable. "
                                 "Skipping the Ping test...")
             return True
         cmd = f"ping -c 4 {self.device_vars['server_ip']}"
@@ -187,15 +187,15 @@ class EdgeNode:
             out = self.parse_out(stdout.decode("utf-8"))
             self.logger.info(f"Output of the ping test: \n{out}")
             if process.returncode != 0:
-                self.logger.info(f"Edge node {self.device_vars['server_ip']} is not reachable")
+                self.logger.info(f"Remote Server {self.device_vars['server_ip']} is not reachable")
                 return False
-            self.logger.info(f"Edge node {self.device_vars['server_ip']} is reachable")
+            self.logger.info(f"Remote Server {self.device_vars['server_ip']} is reachable")
             self.reachable = True
             return True
 
     def close_connection(self):
         """
-        A method to close the session connection with the edge node
+        A method to close the session connection with the remote server
         :return: None
         """
         self.logger.info(f"Closing the connection with the host: {self.device_vars['server_ip']}")
@@ -204,7 +204,7 @@ class EdgeNode:
 
     def open_shell(self):
         """
-        Invokes shell session on the edge node
+        Invokes shell session on the remote server
         """
         try:
             self.logger.info(f"Opening shell connection to remote host "
@@ -220,7 +220,7 @@ class EdgeNode:
         """
         Use this method explicitly for any service related ops
 
-        A method to execute a command inside the edge node
+        A method to execute a command inside the remote server
         Use this method to run command inside any containers in EVE
 
         e.g., If you want to run a command inside kube container in EVE,
@@ -243,13 +243,13 @@ class EdgeNode:
 
     def get_eve_service_command_output(self):
         """
-        A method to get the output of the command executed in the edge node
+        A method to get the output of the command executed in the remote server
         """
         return self.parse_out(self.fulldata)
 
     def execute_command_in_remote_server(self, command):
         """
-        A method to execute a command inside the edge node/app instance
+        A method to execute a command inside the remote server
         :param command: command to be executed
 
         :return: None
@@ -267,8 +267,8 @@ class EdgeNode:
 
     def process(self):
         """
-        A method to process the data received from the edge node
-        This method reads the data from the edge node socket from the self.shell object /
+        A method to process the data received from the remote server
+        This method reads the data from the remote server socket from the self.shell object /
         and stores the data in class variables self.fulldata and self.strdata
 
         :return: None
@@ -288,7 +288,7 @@ class EdgeNode:
     @staticmethod
     def print_lines(data):
         """
-        Debug method to verify if the data is being received from the edge node
+        Debug method to verify if the data is being received from the remote server
         """
         last_line = data
         if '\n' in data:
@@ -298,10 +298,10 @@ class EdgeNode:
                 last_line = ''
         return last_line
 
-    def node_hard_reboot(self):
+    def server_hard_reboot(self):
         """
-        A method to hard reboot the edge node /
-        This method sends a reboot command to the edge node and waits for the node to reboot /
+        A method to hard reboot the remote server /
+        This method sends a reboot command to the remote server and waits for the node to reboot /
                 and establish connection again
 
         :return: None
@@ -309,7 +309,7 @@ class EdgeNode:
 
         cmd = 'reboot'
         self.execute_command_in_remote_server(cmd)
-        self.logger.info("Reboot requested from edge node")
+        self.logger.info("Reboot requested from remote server")
 
         total_time = 0
         return_out, client = None, None
@@ -363,10 +363,10 @@ class EdgeNode:
 
     def parse_out(self, output):
         """
-        This method parses the output received from the edge node and \
+        This method parses the output received from the remote server and \
          parses it into a readable format
 
-        :param output: output received from the edge node
+        :param output: output received from the remote server
 
         :return: parsed_output
         """
@@ -384,21 +384,13 @@ class EdgeNode:
                 out_list.append(out)
         parsed_output = '\n'.join(out_list)
 
-        # Replace the original command if it was formatted without quotes while parsing
-        # (test and add later)
-        # if command_to_replace is not None:
-        #     command_without_quote = lambda x: x.replace("\"", "")
-        #     if command_without_quote(command_to_replace) in parsed_output:
-        #         parsed_output = parsed_output.replace(command_without_quote(command_to_replace), \
-        #         command_to_replace)
-
         return parsed_output
 
     @staticmethod
     def dump_command_output_into_txt(output):
         """
-        This method dumps the output received from the edge node into a text file
-        :param output: output received from the edge node
+        This method dumps the output received from the remote server into a text file
+        :param output: output received from the remote server
         :return: filepath | Path of the file where the output is dumped
         """
         filename = 'output.txt'
@@ -443,22 +435,3 @@ class EdgeNode:
                 except paramiko.SSHException as e:
                     self.logger.error(f"Error closing SFTP: {e}")
         return None
-
-# # Usage:
-# from common.utils.zlog_util import Zlog
-# logger = Zlog(log_dir=os.path.join(os.getcwd(), 'logs'),
-#               log_file=f"edge_node_utils_{os.getpid()}.log")
-# app_vars = {
-#             'server_ip': '192.168.0.55',
-#             'port': 6022,
-#             'username': 'pocuser',
-#             'password': 'pocuser'
-# }
-# app_ssh_client = EdgeNode.get_instance(app_vars, logger) -> Returns an instance of EdgeNode if exists, else creates a new one
-# app_ssh_client.create_device_session()
-# app_ssh_client.open_shell() -> Opens a shell session on the edge node. (Optional, if you want to run commands interactively. If not explicitly called, it will be invoked automatically when executing commands)
-# output = app_ssh_client.execute_command_in_remote_server("cat /tmp/test_file.txt")
-# time.sleep(3)
-# print("================= Output =================")
-# print(output)
-# print("================= Output =================")
