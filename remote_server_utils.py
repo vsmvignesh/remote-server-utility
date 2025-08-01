@@ -36,7 +36,7 @@ class RemoteServer:
     _instances = {}  # Cache: {frozenset(server_vars.items()): (instance, created_time)}
 
     @classmethod
-    def get_instance(cls, server_vars, zlogger, ttl_minutes=5):
+    def get_instance(cls, server_vars, logger, ttl_minutes=5):
         """
         A class method to get an instance of RemoteServer.
 
@@ -45,7 +45,7 @@ class RemoteServer:
         Args:
             server_vars: Dict object of the device variables.
                         Should include: server_ip, port, username, password
-            zlogger: Logger instance for logging
+            logger: Logger instance for logging
             ttl_minutes: Time to live in minutes for the cached instance
                             Currently, it defaults to 5 minutes.
         Returns:
@@ -58,21 +58,21 @@ class RemoteServer:
         if instance_info:
             instance, created_time = instance_info
             if current_time - created_time <= ttl_minutes * 60:
-                zlogger.info(f"Reusing existing RemoteServer instance for {server_vars['server_ip']}")
+                logger.info(f"Reusing existing RemoteServer instance for {server_vars['server_ip']}")
                 instance.fulldata = ''
                 instance.strdata = ''
                 return instance
-            zlogger.info(f"Recreating RemoteServer instance for {server_vars['server_ip']} (expired)")
+            logger.info(f"Recreating RemoteServer instance for {server_vars['server_ip']} (expired)")
             instance.close_connection()
             del cls._instances[key]  # Remove expired instance from cache
 
         # Create new instance
-        new_instance = cls(server_vars, zlogger)
+        new_instance = cls(server_vars, logger)
         cls._instances[key] = (new_instance, current_time)
-        zlogger.info(f"Created new RemoteServer instance for {server_vars['server_ip']}")
+        logger.info(f"Created new RemoteServer instance for {server_vars['server_ip']}")
         return new_instance
 
-    def __init__(self, device_vars, zlogger):
+    def __init__(self, device_vars, logger):
         """
         Args:
             device_vars: Dict object of the device variables.
@@ -83,9 +83,9 @@ class RemoteServer:
                             'username': username,
                             'password': password
                         }
-            zlogger:
+            logger:
         """
-        self.logger = zlogger
+        self.logger = logger
         self.shell = None
         self.client = None
         self.transport = None
