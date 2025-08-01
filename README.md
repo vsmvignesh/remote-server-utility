@@ -237,6 +237,41 @@ The module uses the provided logger instance for all operations. Log levels incl
 
 ## Performance Features
 
+### Singleton Pattern Implementation
+
+The module implements a singleton pattern with caching to optimize performance in automated testing scenarios:
+
+#### Key Benefits for Automated Testing:
+
+- **Reduced SSH Handshake Overhead**: Avoids repeated SSH connection establishment
+- **Connection Reuse**: Multiple test methods can share the same SSH connection
+- **Configurable TTL**: Connections are cached for 5 minutes by default (configurable)
+- **Automatic Cleanup**: Expired connections are automatically cleaned up
+- **Thread-Safe**: Safe for concurrent test execution
+
+#### How It Works:
+
+```python
+# First call - creates new connection
+server1 = RemoteServer.get_instance(server_vars, logger)
+
+# Second call with same parameters - reuses existing connection
+server2 = RemoteServer.get_instance(server_vars, logger)
+
+# server1 and server2 are the same instance
+assert server1 is server2  # True
+```
+
+#### TTL Configuration:
+
+```python
+# Custom TTL (10 minutes)
+server = RemoteServer.get_instance(server_vars, logger, ttl_minutes=10)
+
+# Default TTL (5 minutes)
+server = RemoteServer.get_instance(server_vars, logger)
+```
+
 ### Connection Caching
 
 The module implements instance caching with TTL to avoid repeated connection overhead:
@@ -244,6 +279,7 @@ The module implements instance caching with TTL to avoid repeated connection ove
 - Instances are cached for 5 minutes by default
 - Configurable TTL via `ttl_minutes` parameter
 - Automatic cleanup of expired instances
+- Cache key based on server connection parameters
 
 ### Background Processing
 
@@ -323,6 +359,58 @@ Enable paramiko debug logging:
 import paramiko
 paramiko.common.logging.basicConfig(level=paramiko.common.DEBUG)
 ```
+
+## Best Practices for Automated Testing
+
+### Optimizing Test Performance
+
+1. **Reuse Connections**: Use the singleton pattern to avoid repeated SSH handshakes
+2. **Configure Appropriate TTL**: Set TTL based on your test duration
+3. **Clean Up Resources**: Explicitly close connections when tests complete
+4. **Handle Connection Failures**: Implement retry logic for flaky networks
+
+### Example Test Structure:
+
+```python
+import pytest
+from z_components.eve.eve_utils.edge_node_utils import RemoteServer
+
+class TestRemoteServer:
+    @pytest.fixture(scope="class")
+    def remote_server(self):
+        """Fixture that provides a shared RemoteServer instance for all tests in the class"""
+        server_vars = {
+            'server_ip': '192.168.0.55',
+            'port': 22,
+            'username': 'admin',
+            'password': 'password'
+        }
+        server = RemoteServer.get_instance(server_vars, logger, ttl_minutes=10)
+        server.create_device_session()
+        yield server
+        server.close_connection()
+    
+    def test_server_connectivity(self, remote_server):
+        """Test that server is reachable"""
+        assert remote_server.remote_server_ping_test()
+    
+    def test_command_execution(self, remote_server):
+        """Test command execution"""
+        output = remote_server.execute_command_in_remote_server("echo 'hello'")
+        assert "hello" in output
+    
+    def test_file_operations(self, remote_server):
+        """Test file reading operations"""
+        content = remote_server.read_remote_file("/etc/hostname")
+        assert content is not None
+```
+
+### Performance Comparison:
+
+| Approach | SSH Handshakes | Test Execution Time | Memory Usage |
+|----------|----------------|-------------------|--------------|
+| New connection per test | High | Slow | High |
+| Singleton with caching | Low | Fast | Low |
 
 ## Contributing
 
