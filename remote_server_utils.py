@@ -72,10 +72,10 @@ class RemoteServer:
         logger.info(f"Created new RemoteServer instance for {server_vars['server_ip']}")
         return new_instance
 
-    def __init__(self, device_vars, logger):
+    def __init__(self, server_vars, logger):
         """
         Args:
-            device_vars: Dict object of the device variables.
+            server_vars: Dict object of the device variables.
                         Should include: server_ip, port, username, password
 
             Sample dict: {  'server_ip': node_ip_address,
@@ -92,7 +92,7 @@ class RemoteServer:
         self.fulldata = ''
         self.strdata = ''
         self.node_details = None
-        self.device_vars = device_vars
+        self.server_vars = server_vars
         self.priv_key_path = None
         self.scp = None
         self.reachable = False
@@ -107,30 +107,30 @@ class RemoteServer:
         max_retries = 10
         while retries <= max_retries:
             try:
-                self.logger.info(f"Connecting to server on ip {self.device_vars['server_ip']}")
-                self.logger.info(f"Removing old SSH key entry for {self.device_vars['server_ip']} "
+                self.logger.info(f"Connecting to server on ip {self.server_vars['server_ip']}")
+                self.logger.info(f"Removing old SSH key entry for {self.server_vars['server_ip']} "
                                  "to avoid conflicts.")
-                #subprocess.run(["ssh-keygen", "-R", self.device_vars['server_ip']],
+                #subprocess.run(["ssh-keygen", "-R", self.server_vars['server_ip']],
                 #               stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
                 self.client = paramiko.client.SSHClient()
                 self.client.set_missing_host_key_policy(paramiko.client.AutoAddPolicy())
-                port = self.device_vars.get('port', 22)
+                port = self.server_vars.get('port', 22)
                 if priv_key is None:
-                    if 'password' in self.device_vars:
-                        self.client.connect(str(self.device_vars['server_ip']),
+                    if 'password' in self.server_vars:
+                        self.client.connect(str(self.server_vars['server_ip']),
                                             port=port,
-                                            username=self.device_vars['username'],
-                                            password=self.device_vars['password'], timeout=60)
+                                            username=self.server_vars['username'],
+                                            password=self.server_vars['password'], timeout=60)
                     else:
-                        self.client.connect(self.device_vars['server_ip'],
+                        self.client.connect(self.server_vars['server_ip'],
                                             port=port,
-                                            username=self.device_vars['username'],
+                                            username=self.server_vars['username'],
                                             key_filename=self.priv_key_path, timeout=60)
                 else:
                     if os.path.exists(priv_key):
-                        self.client.connect(self.device_vars['server_ip'],
+                        self.client.connect(self.server_vars['server_ip'],
                                             port=port,
-                                            username=self.device_vars['username'],
+                                            username=self.server_vars['username'],
                                             key_filename=priv_key, timeout=60)
                     else:
                         self.logger.error(f"Private key file {priv_key} does not exist")
@@ -141,8 +141,8 @@ class RemoteServer:
                 thread = threading.Thread(target=self.process)
                 thread.daemon = True
                 thread.start()
-                self.logger.info(f"Connected to the host at '{self.device_vars['server_ip']}' "
-                                 f"via '{self.device_vars['port']}'")
+                self.logger.info(f"Connected to the host at '{self.server_vars['server_ip']}' "
+                                 f"via '{self.server_vars['port']}'")
                 break
 
             except (paramiko.ssh_exception.BadHostKeyException,
@@ -165,8 +165,8 @@ class RemoteServer:
                 # If the max retries are reached, raise the exception
                 if retries == max_retries+1:
                     self.logger.error(f"Failed to connect to the host at "
-                                      f"'{self.device_vars['server_ip']}' "
-                                      f"via '{self.device_vars['port']}'")
+                                      f"'{self.server_vars['server_ip']}' "
+                                      f"via '{self.server_vars['port']}'")
                     self.client = None
 
     def remote_server_ping_test(self):
@@ -174,10 +174,10 @@ class RemoteServer:
         A method to test the connectivity with the remote server using ping
         """
         if self.reachable:
-            self.logger.info(f"Already verified that Remote Server {self.device_vars['server_ip']} is reachable. "
+            self.logger.info(f"Already verified that Remote Server {self.server_vars['server_ip']} is reachable. "
                                 "Skipping the Ping test...")
             return True
-        cmd = f"ping -c 4 {self.device_vars['server_ip']}"
+        cmd = f"ping -c 4 {self.server_vars['server_ip']}"
         with Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE) as process:
             stdout, stderr = process.communicate()                                                  #pylint: disable=unused-variable
             if stderr:
@@ -186,9 +186,9 @@ class RemoteServer:
             out = self.parse_out(stdout.decode("utf-8"))
             self.logger.info(f"Output of the ping test: \n{out}")
             if process.returncode != 0:
-                self.logger.info(f"Remote Server {self.device_vars['server_ip']} is not reachable")
+                self.logger.info(f"Remote Server {self.server_vars['server_ip']} is not reachable")
                 return False
-            self.logger.info(f"Remote Server {self.device_vars['server_ip']} is reachable")
+            self.logger.info(f"Remote Server {self.server_vars['server_ip']} is reachable")
             self.reachable = True
             return True
 
@@ -197,7 +197,7 @@ class RemoteServer:
         A method to close the session connection with the remote server
         :return: None
         """
-        self.logger.info(f"Closing the connection with the host: {self.device_vars['server_ip']}")
+        self.logger.info(f"Closing the connection with the host: {self.server_vars['server_ip']}")
         if self.client is not None:
             self.client.close()
 
@@ -207,8 +207,8 @@ class RemoteServer:
         """
         try:
             self.logger.info(f"Opening shell connection to remote host "
-                             f"'{self.device_vars['server_ip']}'"
-                             f" through port '{self.device_vars['port']}'")
+                             f"'{self.server_vars['server_ip']}'"
+                             f" through port '{self.server_vars['port']}'")
             if not self.shell:
                 self.shell = self.client.invoke_shell()
         except paramiko.ssh_exception.SSHException as e:
