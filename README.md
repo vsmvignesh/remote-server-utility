@@ -1,423 +1,223 @@
-# Remote Server Utils
+# Remote Server SSH Utility
 
-A comprehensive Python utility module for managing and interacting with remote servers and virtual machines.
-
-## Overview
-
-The `remote_server_utils.py` module provides a robust `RemoteServer` class that handles SSH connections, command execution, and file operations on remote servers. It's designed for automation scenarios involving remote hosts, virtual machines, and containerized environments.
+A standalone, reusable Python SSH utility for managing remote server connections, executing commands with session-level caching, and transferring files — built on top of [Paramiko](https://www.paramiko.org/).
 
 ## Features
 
-- **SSH Connection Management**: Secure SSH connections with retry logic and connection pooling
-- **Command Execution**: Execute commands both in remote servers and within EVE services
-- **File Operations**: Read remote files using SFTP
-- **Connection Caching**: Instance caching with TTL to optimize performance
-- **Error Handling**: Comprehensive error handling with detailed logging
-- **ANSI Escape Sequence Cleaning**: Automatic cleaning of terminal output
-- **Hard Reboot Support**: Remote server reboot with automatic reconnection
-- **Ping Testing**: Network connectivity verification
+- **Singleton SSH Client** — One connection per server, automatically reused within a configurable TTL.
+- **Command Output Caching** — LRU cache with per-entry TTL so repeated commands are instant. Cache persists across reconnections.
+- **Password & Key Authentication** — Supports password, explicit private key, default private key, or SSH agent fallback.
+- **Interactive Shell** — Background thread continuously reads shell output for interactive workflows.
+- **Jump-Host / Nested SSH** — Execute commands on a target server by hopping through the current server.
+- **SCP File Transfer** — Upload and download files via SCP (optional `scp` dependency).
+- **SFTP File Reading** — Read remote files without downloading them.
+- **Reboot & Reconnect** — Send a reboot command and automatically wait for the server to come back online.
+- **Ping Test** — ICMP reachability check before attempting SSH.
+- **Credential Safety** — Commands containing passwords are automatically excluded from cache and redacted in logs.
+- **ANSI Stripping** — Clean raw terminal output into readable text.
 
 ## Installation
 
-### Prerequisites
-
 ```bash
-pip install paramiko scp
+pip install paramiko
+pip install scp  # optional — only needed for upload_file / download_file
 ```
 
-### Dependencies
+Copy `remote_server_ssh_utility.py` into your project.
 
-- `paramiko`: SSH protocol implementation
-- `scp`: SCP client for file transfers
-- `threading`: For background data processing
-- `socket`: Network operations
-- `subprocess`: Local command execution
-- `re`: Regular expressions for output parsing
-- `time`: Timing and delays
-- `os`: Operating system interface
-
-## Usage
-
-### Basic Usage
+## Quick Start
 
 ```python
 import logging
-from z_components.eve.eve_utils.edge_node_utils import RemoteServer
-import os
+from remote_server_ssh_utility import RemoteServer
 
-# Initialize logger
-logger = logging.getLogger("remote_server_utils")
-logger.setLevel(logging.INFO)
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-# Now you can use logger.info(), logger.warning(), logger.error()
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("ssh")
 
-# Define remote server connection parameters
-app_vars = {
-    'server_ip': '192.168.0.55',
+config = {
+    'server_ip': '192.168.1.10',
     'port': 22,
     'username': 'admin',
-    'password': 'password'
+    'password': 's3cret',
 }
 
-# Get RemoteServer instance (uses caching)
-app_ssh_client = RemoteServer.get_instance(app_vars, logger)
+# Get or create a singleton instance
+server = RemoteServer.get_instance(config, logger)
+server.connect()
 
-# Create SSH session
-app_ssh_client.create_device_session()
-
-# Execute remote command
-output = app_ssh_client.execute_command_in_remote_server("cat /tmp/test_file.txt")
+# Run a command
+output = server.execute_command("uname -a")
 print(output)
-```
 
-### Advanced Usage
+# Run with caching — second call is served from cache
+output = server.execute_command("cat /etc/os-release", use_cache=True)
+output = server.execute_command("cat /etc/os-release", use_cache=True)  # cache hit
 
-```python
-# Test connectivity
-if app_ssh_client.remote_server_ping_test():
-    print("Remote server is reachable")
-
-
-# Read remote file
-file_content = app_ssh_client.read_remote_file("/etc/hostname")
-print(f"Hostname: {file_content}")
-
-# Hard reboot server
-app_ssh_client.node_hard_reboot()
+# Disconnect when done
+server.disconnect()
 ```
 
 ## API Reference
 
-### RemoteServer Class
+### Class: `RemoteServer`
 
-#### Class Methods
+#### Factory
 
-##### `get_instance(server_vars, zlogger, ttl_minutes=5)`
+| Method | Description |
+|---|---|
+| `RemoteServer.get_instance(server_config, logger, ttl_minutes=5)` | Return an existing instance if within TTL, otherwise create a new one. |
 
-Returns a cached instance of RemoteServer or creates a new one.
+#### Constructor
 
-**Parameters:**
-- `server_vars` (dict): Device connection parameters
-- `zlogger`: Logger instance
-- `ttl_minutes` (int): Time to live for cached instances (default: 5)
+```python
+RemoteServer(server_config, logger, default_private_key=None)
+```
 
-**Returns:**
-- `RemoteServer`: Instance of RemoteServer class
+| Parameter | Type | Description |
+|---|---|---|
+| `server_config` | `dict` | `server_ip`, `port`, `username`, and optionally `password`. |
+| `logger` | logger | Any logger with `.info()`, `.error()`, `.debug()`, `.warning()` methods. |
+| `default_private_key` | `str \| None` | Fallback private key path when no password is provided. |
 
-#### Instance Methods
+#### Connection
 
-##### `create_device_session(priv_key=None)`
+| Method | Description |
+|---|---|
+| `connect(private_key=None)` | Establish SSH session (up to 10 retries). |
+| `disconnect()` | Close SSH session. Cache is preserved. |
+| `open_shell()` | Manually (re)open an interactive shell channel. |
+| `ping()` | ICMP ping test. Returns `True` / `False`. |
 
-Establishes SSH connection to the remote server.
+#### Command Execution
 
-**Parameters:**
-- `priv_key` (str, optional): Path to private key file
+| Method | Description |
+|---|---|
+| `execute_command(command, use_cache=False)` | Execute via `exec_command`. Returns stdout as string. |
+| `execute_via_jump_host(target_config, command, use_cache=False)` | SSH through this server to a target host and execute a command. |
+| `server_hard_reboot(reboot_command='reboot', reconnect_timeout=300)` | Send reboot and wait for reconnection. Returns `True` / `False`. |
 
-**Features:**
-- Automatic retry logic (10 attempts with 15-second delays)
-- Support for password and key-based authentication
-- Automatic host key policy handling
-
-##### `remote_server_ping_test()`
-
-Tests network connectivity to the remote server.
-
-**Returns:**
-- `bool`: True if reachable, False otherwise
-
-##### `execute_command_in_remote_server(command)`
-
-Executes a command on the remote server.
-
-**Parameters:**
-- `command` (str): Command to execute
-
-**Returns:**
-- `str`: Command output
-
-**Parameters:**
-- `service` (str): Service/container name (e.g., "docker", "kube")
-- `command` (str): Command to execute
-
-**Returns:**
-- `str`: Command output
-
-##### `read_remote_file(remote_file_path)`
-
-Reads contents of a file on the remote host.
-
-**Parameters:**
-- `remote_file_path` (str): Path to remote file
-
-**Returns:**
-- `str`: File contents or None if error
-
-##### `node_hard_reboot()`
-
-Performs a hard reboot of the remote server with automatic reconnection.
-
-**Returns:**
-- `tuple`: (return_out, client) - typically (None, None)
-
-##### `close_connection()`
-
-Closes the SSH connection.
-
-#### Static Methods
-
-##### `escape_ansi(input_string)`
-
-Removes ANSI escape sequences from terminal output.
-
-**Parameters:**
-- `input_string` (str): Input string with ANSI codes
-
-**Returns:**
-- `str`: Cleaned string
-
-##### `dump_command_output_into_txt(output)`
-
-Saves command output to a text file.
-
-**Parameters:**
-- `output` (str): Command output to save
-
-**Returns:**
-- `str`: Path to saved file
-
-## Configuration
-
-### Connection Parameters
-
-The `server_vars` dictionary should contain:
+**`target_config` dict for jump-host:**
 
 ```python
 {
-    'server_ip': '192.168.0.55',    # Remote server IP address
-    'port': 22,                     # SSH port (default: 22)
-    'username': 'admin',            # SSH username
-    'password': 'password'          # SSH password (optional if using key)
+    'target_ip': '10.0.0.5',
+    'target_username': 'user',
+    'target_password': 'pass',
+    'target_port': 22,  # optional, default 22
 }
 ```
 
-### SSH Key Authentication
+#### Caching
 
-To use SSH key authentication:
+| Method | Description |
+|---|---|
+| `get_cached_output(command)` | Look up cached output across all cache-key types. |
+| `clear_cache(command=None)` | Clear cache for a specific command, or the entire cache. |
 
-1. Place your private key in the resources directory
-2. Use the `priv_key` parameter in `create_device_session()`
+Cache behaviour:
+- Entries expire after **5 minutes** (`_CACHE_ENTRY_TTL_SECONDS`).
+- Max **256 entries** per server, evicted LRU (`_CACHE_MAX_ENTRIES_PER_SERVER`).
+- Commands containing credentials are **never cached**.
+- Cache survives `disconnect()` / reconnection — call `clear_cache()` to reset.
 
-```python
-app_ssh_client.create_device_session(priv_key="/path/to/private/key")
-```
+#### File Operations
 
-## Error Handling
+| Method | Description |
+|---|---|
+| `read_remote_file(remote_file_path)` | Read a file via SFTP. Returns `bytes` or `None`. |
+| `upload_file(local_path, remote_path)` | Upload via SCP (requires `scp` package). |
+| `download_file(remote_path, local_path)` | Download via SCP (requires `scp` package). |
 
-The module includes comprehensive error handling for:
+#### Output Helpers
 
-- Network connectivity issues
-- Authentication failures
-- SSH connection timeouts
-- File operation errors
-- Command execution failures
+| Method | Description |
+|---|---|
+| `parse_output(output)` | Clean raw shell output (strip ANSI, byte artefacts). |
+| `escape_ansi(input_string)` | Static — remove ANSI escape sequences. |
+| `print_lines(data)` | Static — return the last line from streamed data. |
 
-All errors are logged with detailed information for debugging.
+## Advanced Usage
 
-## Logging
-
-The module uses the provided logger instance for all operations. Log levels include:
-
-- `INFO`: Connection status, command execution
-- `ERROR`: Connection failures, authentication errors
-- `DEBUG`: Detailed SSH operations (when paramiko debug is enabled)
-
-## Performance Features
-
-### Singleton Pattern Implementation
-
-The module implements a singleton pattern with caching to optimize performance in automated testing scenarios:
-
-#### Key Benefits for Automated Testing:
-
-- **Reduced SSH Handshake Overhead**: Avoids repeated SSH connection establishment
-- **Connection Reuse**: Multiple test methods can share the same SSH connection
-- **Configurable TTL**: Connections are cached for 5 minutes by default (configurable)
-- **Automatic Cleanup**: Expired connections are automatically cleaned up
-- **Thread-Safe**: Safe for concurrent test execution
-
-#### How It Works:
+### Singleton Pattern
 
 ```python
-# First call - creates new connection
-server1 = RemoteServer.get_instance(server_vars, logger)
-
-# Second call with same parameters - reuses existing connection
-server2 = RemoteServer.get_instance(server_vars, logger)
-
-# server1 and server2 are the same instance
-assert server1 is server2  # True
+# Both variables point to the same SSH session
+server_a = RemoteServer.get_instance(config, logger)
+server_b = RemoteServer.get_instance(config, logger)
+assert server_a is server_b
 ```
 
-#### TTL Configuration:
+Instances are keyed by the full `server_config` dict (IP + port + username + password), so different ports or users on the same IP get separate instances.
+
+### Private Key Authentication
 
 ```python
-# Custom TTL (10 minutes)
-server = RemoteServer.get_instance(server_vars, logger, ttl_minutes=10)
+# Option 1: Default key in constructor
+server = RemoteServer(config, logger, default_private_key="~/.ssh/id_rsa")
+server.connect()
 
-# Default TTL (5 minutes)
-server = RemoteServer.get_instance(server_vars, logger)
+# Option 2: Per-connection key
+server = RemoteServer(config, logger)
+server.connect(private_key="/path/to/key")
+
+# Option 3: No key, no password — falls back to SSH agent / ~/.ssh keys
+config_no_pass = {'server_ip': '10.0.0.1', 'port': 22, 'username': 'admin'}
+server = RemoteServer(config_no_pass, logger)
+server.connect()
 ```
 
-### Connection Caching
-
-The module implements instance caching with TTL to avoid repeated connection overhead:
-
-- Instances are cached for 5 minutes by default
-- Configurable TTL via `ttl_minutes` parameter
-- Automatic cleanup of expired instances
-- Cache key based on server connection parameters
-
-### Background Processing
-
-Command output is processed in background threads to prevent blocking operations.
-
-## Security Considerations
-
-- Uses `AutoAddPolicy` for host key management
-- Supports both password and key-based authentication
-- Automatic cleanup of SSH connections
-- No hardcoded credentials
-
-## Examples
-
-### Basic Command Execution
+### Jump-Host / Nested SSH
 
 ```python
-# Simple command execution
-output = app_ssh_client.execute_command_in_remote_server("ls -la")
-print(output)
+# Connect to a bastion/jump host
+bastion = RemoteServer.get_instance(bastion_config, logger)
+bastion.connect()
+
+# Execute on an internal server through the bastion
+target = {
+    'target_ip': '10.0.0.5',
+    'target_username': 'appuser',
+    'target_password': 'apppass',
+}
+output = bastion.execute_via_jump_host(target, "systemctl status nginx")
 ```
 
-### File Operations
+### Reboot & Reconnect
 
 ```python
-# Read system configuration
-config = app_ssh_client.read_remote_file("/etc/hostname")
-print(config)
+# Default reboot command
+success = server.server_hard_reboot()
 
-# Read application logs
-logs = app_ssh_client.read_remote_file("/var/log/syslog")
-print(logs)
-
-# Read custom configuration files
-app_config = app_ssh_client.read_remote_file("/opt/app/config.json")
-print(app_config)
+# Custom reboot command and timeout
+success = server.server_hard_reboot(
+    reboot_command="sudo shutdown -r now",
+    reconnect_timeout=600,
+)
 ```
 
-### Server Management
+### SCP File Transfer
 
 ```python
-# Test connectivity before operations
-if app_ssh_client.remote_server_ping_test():
-    # Perform operations
-    app_ssh_client.execute_command_in_remote_server("systemctl status ssh")
-else:
-    print("Server is not reachable")
-
-# Reboot server if needed
-app_ssh_client.node_hard_reboot()
+server.upload_file("/local/data.csv", "/remote/data.csv")
+server.download_file("/remote/results.json", "/local/results.json")
 ```
 
-## Troubleshooting
+> **Note:** Requires `pip install scp`. If not installed, a clear `RuntimeError` is raised.
 
-### Common Issues
+## Configuration Constants
 
-1. **Connection Timeout**
-   - Check network connectivity
-   - Verify IP address and port
-   - Ensure SSH service is running
+| Constant | Default | Description |
+|---|---|---|
+| `_CACHE_ENTRY_TTL_SECONDS` | `300` | Per-entry cache lifetime (seconds). |
+| `_CACHE_MAX_ENTRIES_PER_SERVER` | `256` | Max cached commands per server (LRU). |
 
-2. **Authentication Failure**
-   - Verify username and password
-   - Check SSH key permissions
-   - Ensure user has SSH access
-
-3. **Command Execution Issues**
-   - Check command syntax
-   - Verify user permissions
-   - Ensure target service/container exists (for service commands)
-
-### Debug Mode
-
-Enable paramiko debug logging:
+Override on the class before creating instances:
 
 ```python
-import paramiko
-paramiko.common.logging.basicConfig(level=paramiko.common.DEBUG)
+RemoteServer._CACHE_ENTRY_TTL_SECONDS = 600      # 10 minutes
+RemoteServer._CACHE_MAX_ENTRIES_PER_SERVER = 512  # larger cache
 ```
 
-## Best Practices for Automated Testing
+## License
 
-### Optimizing Test Performance
-
-1. **Reuse Connections**: Use the singleton pattern to avoid repeated SSH handshakes
-2. **Configure Appropriate TTL**: Set TTL based on your test duration
-3. **Clean Up Resources**: Explicitly close connections when tests complete
-4. **Handle Connection Failures**: Implement retry logic for flaky networks
-
-### Example Test Structure:
-
-```python
-import pytest
-from z_components.eve.eve_utils.edge_node_utils import RemoteServer
-
-class TestRemoteServer:
-    @pytest.fixture(scope="class")
-    def remote_server(self):
-        """Fixture that provides a shared RemoteServer instance for all tests in the class"""
-        server_vars = {
-            'server_ip': '192.168.0.55',
-            'port': 22,
-            'username': 'admin',
-            'password': 'password'
-        }
-        server = RemoteServer.get_instance(server_vars, logger, ttl_minutes=10)
-        server.create_device_session()
-        yield server
-        server.close_connection()
-    
-    def test_server_connectivity(self, remote_server):
-        """Test that server is reachable"""
-        assert remote_server.remote_server_ping_test()
-    
-    def test_command_execution(self, remote_server):
-        """Test command execution"""
-        output = remote_server.execute_command_in_remote_server("echo 'hello'")
-        assert "hello" in output
-    
-    def test_file_operations(self, remote_server):
-        """Test file reading operations"""
-        content = remote_server.read_remote_file("/etc/hostname")
-        assert content is not None
-```
-
-### Performance Comparison:
-
-| Approach | SSH Handshakes | Test Execution Time | Memory Usage |
-|----------|----------------|-------------------|--------------|
-| New connection per test | High | Slow | High |
-| Singleton with caching | Low | Fast | Low |
-
-## Contributing
-
-When contributing to this module:
-
-1. Follow the existing code style
-2. Add comprehensive error handling
-3. Include logging for all operations
-4. Update this README for new features
-5. Add unit tests for new functionality
+MIT License. See [LICENSE](LICENSE) for details.
