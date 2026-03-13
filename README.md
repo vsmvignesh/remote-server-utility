@@ -217,7 +217,3 @@ Override on the class before creating instances:
 RemoteServer._CACHE_ENTRY_TTL_SECONDS = 600      # 10 minutes
 RemoteServer._CACHE_MAX_ENTRIES_PER_SERVER = 512  # larger cache
 ```
-
-## License
-
-MIT License. See [LICENSE](LICENSE) for details.
